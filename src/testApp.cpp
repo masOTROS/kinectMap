@@ -1,11 +1,15 @@
 #include "testApp.h"
+#include "homography.h"
+
 //--------------------------------------------------------------
 void testApp::setup() {
 
 	ofSetLogLevel(OF_LOG_VERBOSE);
-    
+
     ofEnableAlphaBlending();
     ofSetPolyMode(OF_POLY_WINDING_NONZERO);
+
+	backgroundImg.loadImage("mapa.jpg");
 
     // enable depth->rgb image calibration
 	kinect.setRegistration(true);
@@ -20,7 +24,7 @@ void testApp::setup() {
 	//ofSleepMillis(1000);
 
 	kinect.enableDepthNearValueWhite(true);
-    
+
     ofAddListener(touchTracker.blobAdded, this, &testApp::touchAdded);
     ofAddListener(touchTracker.blobMoved, this, &testApp::touchMoved);
     ofAddListener(touchTracker.blobDeleted, this, &testApp::touchDeleted);
@@ -30,49 +34,54 @@ void testApp::setup() {
     thresMask.allocate(kinect.width, kinect.height);
     inPainter.setup(kinect.width, kinect.height);
 
-    nearThreshold=560.;
-    farThreshold=880.;
+    tmpThresMask = new unsigned char[kinect.width*kinect.height];
+    tmpMapMask = new unsigned char[kinect.width*kinect.height];
+    tmpZonesMask = new unsigned char[kinect.width*kinect.height];
 
-    touchDiffFarThreshold=120.;
-    touchDiffNearThreshold=7.;
+    nearThreshold=10000.;
+    farThreshold=10000.;
+
+    touchDiffFarThreshold=50.;
+    touchDiffNearThreshold=10.;
 
     maxBlobs = 10;
-    minBlobPoints=0;
+    minBlobPoints=250;
     maxBlobPoints=1000000;
-    
+
     dilate=10;
-    erode=4;
+    erode=10;
 
-	learnBackground = true;
-	backFrames=0.;
-
-	zonesOpen=false;
 	zonesFbo.allocate(kinect.width,kinect.height);
 	zonesPixels.allocate(kinect.width,kinect.height,OF_IMAGE_GRAYSCALE);
     loadZones();
     mapMask.allocate(kinect.width, kinect.height);
-    
-    mapOpen=false;
+
     mapPoint=0;
 	mapFbo.allocate(kinect.width,kinect.height);
 	mapPixels.allocate(kinect.width,kinect.height,OF_IMAGE_GRAYSCALE);
     loadMap();
     zonesMask.allocate(kinect.width, kinect.height);
-    
+	screenRef[0]=ofPoint(0,0);
+	screenRef[1]=ofPoint(640,0);
+	screenRef[2]=ofPoint(640,480);
+	screenRef[3]=ofPoint(0,480);
+
+    sender.setup(IP,PORT);
+
     gui = new ofxUISuperCanvas("kinectMap", OFX_UI_FONT_MEDIUM);
     gui->addSpacer();
     gui->addTextArea("CONTROL", "Control de parametros de kinectMap");
     gui->addSpacer();
-    gui->addSlider("angle", -30., 30., &angle);
+    gui->addSlider("angle", -30, 30, &angle);
     gui->addLabelToggle("learnBackground", &learnBackground);
     gui->addSlider("backFrames", 0.0, BACKGROUND_FRAMES, &backFrames);
     gui->addSpacer();
     gui->addSlider("maxBlobs", 0, 20, &maxBlobs);
-    gui->addRangeSlider("min and max blob points", 0, 150000, &minBlobPoints,&maxBlobPoints);
+    gui->addSlider("min blob points", 0, 2000, &minBlobPoints);
     gui->addSpacer();
-    gui->addRangeSlider("near and far threshold", 0., 2000., &nearThreshold,&farThreshold);
+    gui->addRangeSlider("near and far threshold", 0., 5000., &nearThreshold,&farThreshold);
     gui->addSpacer();
-    gui->addRangeSlider("touch near and far threshold", 0., 500., &touchDiffNearThreshold,&touchDiffFarThreshold);
+    gui->addRangeSlider("touch near and far threshold", 0., 50., &touchDiffNearThreshold,&touchDiffFarThreshold);
     gui->addSpacer();
     gui->addLabelToggle("mapOpen", &mapOpen);
     gui->addSpacer();
@@ -82,9 +91,16 @@ void testApp::setup() {
     gui->addSlider("erode", 0, 20, &erode);
     gui->autoSizeToFitWidgets();
     ofAddListener(gui->newGUIEvent,this,&testApp::guiEvent);
-    
+
     if(ofFile::doesFileExist("GUI/guiSettings.xml"))
         gui->loadSettings("GUI/guiSettings.xml");
+
+    mapOpen=false;
+
+    zonesOpen=false;
+
+    learnBackground = true;
+    backFrames=0.;
 
 	ofSetFrameRate(60);
 
@@ -100,13 +116,13 @@ void testApp::update() {
 
 		// load depth image from the kinect source
 		ofFloatPixels current=kinect.getDistancePixelsRef();
-        
+
         int numPixels = kinect.width*kinect.height;
+        unsigned char * tmpCurrent = kinect.getDepthPixels();
+        unsigned char * tmpBackground = backgroundTex.getPixels();
 
         if(learnBackground || backFrames)
         {
-            unsigned char * tmpCurrent = kinect.getDepthPixels();
-            unsigned char * tmpBackground = backgroundTex.getPixels();
             if(backFrames){
                 for(int i=0;i<numPixels;i++)
                 {
@@ -124,7 +140,7 @@ void testApp::update() {
                 }
                 backFrames--;
                 if(!backFrames){
-                    inPainter.inpaint(backgroundTex);
+                    //inPainter.inpaint(backgroundTex);
                 }
             }
             if(learnBackground){
@@ -136,17 +152,22 @@ void testApp::update() {
                 backFrames=BACKGROUND_FRAMES;
                 learnBackground = false;
             }
-            backgroundTex.flagImageChanged();
         }
-        
-        unsigned char * tmpThresMask = new unsigned char[numPixels];
-        unsigned char * tmpMapMask = new unsigned char[numPixels];
-        unsigned char * tmpZonesMask = new unsigned char[numPixels];
-        
+
+        float backUpdateFast=0.05;
+        float backUpdateSlow=0.005;
+
         for(int i=0;i<numPixels;i++)
         {
             tmpThresMask[i]=0;
             tmpMapMask[i]=0;
+            tmpZonesMask[i]=0;
+            float tmpBackDist = background[i];
+            float tmpBackImg = tmpBackground[i];
+            if(current[i]){
+                tmpBackDist = (1.-backUpdateFast)*background[i] + backUpdateFast*current[i];
+                tmpBackImg = (1.-backUpdateFast)*((float)tmpBackground[i]) + backUpdateFast*((float)tmpCurrent[i]);
+            }
             if(current[i]<farThreshold && current[i]>nearThreshold)
             {
                 tmpThresMask[i]=(unsigned char)ofMap(current[i],nearThreshold,farThreshold,255,0);
@@ -154,6 +175,8 @@ void testApp::update() {
                     float diff=background[i]-current[i];
                     if(diff>touchDiffNearThreshold){
                         tmpMapMask[i]=255;
+                        tmpBackDist = (1.-backUpdateSlow)*background[i] + backUpdateSlow*current[i];
+                        tmpBackImg = (1.-backUpdateSlow)*((float)tmpBackground[i]) + backUpdateSlow*((float)tmpCurrent[i]);
                         if(zonesPixels[i]){
                             if(diff<touchDiffFarThreshold){
                                 tmpZonesMask[i]=255;//(unsigned char)ofMap(diff,touchDiffNearThreshold,touchDiffFarThreshold,100,255);
@@ -162,6 +185,8 @@ void testApp::update() {
                     }
                 }
             }
+            background[i] = tmpBackDist;
+            tmpBackground[i] = (unsigned char)tmpBackImg;
         }
         thresMask.setFromPixels(tmpThresMask, kinect.width, kinect.height);
         mapMask.setFromPixels(tmpMapMask, kinect.width, kinect.height);
@@ -169,60 +194,81 @@ void testApp::update() {
 
         cvErode(mapMask.getCvImage(), mapMask.getCvImage(), NULL, erode);
         cvDilate(mapMask.getCvImage(), mapMask.getCvImage(), NULL, dilate);
-        
+
         cvAnd(zonesMask.getCvImage(),mapMask.getCvImage(),zonesMask.getCvImage());
-    
+
         touchTracker.update( zonesMask, -1, minBlobPoints , maxBlobPoints, maxBlobs, 20, false, true);
+
+        backgroundTex.flagImageChanged();
+
     }
 
 }
 
 //--------------------------------------------------------------
 void testApp::draw() {
-    ofBackground(100, 100, 100);
-
-	ofSetColor(255, 255, 255);
-    // draw from the live kinect
-    kinect.drawDepth(10, 10, 320, 240);
-
-    backgroundTex.draw(340,10,320,240);
-
-    thresMask.draw(10, 260, 320, 240);
-    
-    ofSetColor(255, 0 , 0);
-    mapMask.draw(340, 260, 320, 240);
-    
-    ofSetColor(0, 0, 255, 150);
-    zonesMask.draw(340, 260, 320, 240);
-
-    ofSetColor(255,0,255,60);
-    mapFbo.draw(10,260,320,240);
-    
-    ofSetColor(255,255,0,100);
-    zonesFbo.draw(10,260,320,240);
-
-    touchTracker.draw(340,260,320,240);
-
-	// draw instructions
-	ofSetColor(255, 255, 255);
-	stringstream reportStream;
-	reportStream << "num touch points found: " << touchTracker.size()
-	<< ", fps: " << ofToString(ofGetFrameRate(),2) << endl
-    << "press c to close the connection and o to open it again, connection is: " << kinect.isConnected() << endl;
-	ofDrawBitmapString(reportStream.str(),20,510);
-	if(backFrames)
-	{
-        ofDrawBitmapString("WAIT!",360,100);
+	if(zonesOpen){
+        ofSetColor(255);
+        backgroundImg.draw(0, 0, ofGetWidth(), ofGetHeight());
+        ofSetColor(0, 0, 255, 60);
+        zonesFbo.draw(0, 0, ofGetWidth(), ofGetHeight());
+        ofDrawBitmapString("Ready to add points",10,10);
     }
-    if(zonesOpen)
-    {
-        ofDrawBitmapString("Ready to add points",10,270);
+    else if(mapOpen){
+        ofSetColor(255);
+        thresMask.draw(0, 0, ofGetWidth(), ofGetHeight());
+        ofSetColor(255, 0 , 0, 60);
+        mapFbo.draw(0, 0, ofGetWidth(), ofGetHeight());
     }
+    else{
+		ofBackground(100, 100, 100);
+
+		ofSetColor(255, 255, 255);
+		// draw from the live kinect
+		kinect.drawDepth(10, 10, 320, 240);
+
+		backgroundTex.draw(340,10,320,240);
+
+		thresMask.draw(10, 260, 320, 240);
+
+		ofSetColor(255, 0 , 0);
+		mapMask.draw(340, 260, 320, 240);
+
+		ofSetColor(0, 0, 255, 150);
+		zonesMask.draw(340, 260, 320, 240);
+
+		ofSetColor(255,0,255,60);
+		mapFbo.draw(10,260,320,240);
+
+		ofSetColor(255,255,0,100);
+		zonesFbo.draw(10,260,320,240);
+
+		touchTracker.draw(340,260,320,240);
+
+		// draw instructions
+		ofSetColor(255, 255, 255);
+		stringstream reportStream;
+		reportStream << "num touch points found: " << touchTracker.size()
+		<< ", fps: " << ofToString(ofGetFrameRate(),2) << endl
+		<< "press c to close the connection and o to open it again, connection is: " << kinect.isConnected() << endl;
+		ofDrawBitmapString(reportStream.str(),20,510);
+		if(backFrames)
+		{
+			ofDrawBitmapString("WAIT!",360,100);
+		}
+	}
 }
 
 //--------------------------------------------------------------
 void testApp::touchAdded(ofxBlob &_blob){
     //ofLog(OF_LOG_NOTICE, "Blob ID " + ofToString(_blob.id) + " added" );
+    int x=_blob.centroid.x*kinect.width;
+    int y=_blob.centroid.y*kinect.height;
+    int z=255-zonesPixels[x+y*kinect.width];
+    ofxOscMessage m;
+    m.setAddress("/play");
+    m.addIntArg(z-1);
+    sender.sendMessage(m);
 }
 
 //--------------------------------------------------------------
@@ -249,12 +295,22 @@ void testApp::guiEvent(ofxUIEventArgs &e)
         if(zonesOpen){
             vector<ofPoint> points;
             zones.push_back(points);
+			ofSetFullscreen(true);
         }
         else{
+			ofSetFullscreen(false);
             if(zones.size()){
                 if(!zones.back().size()){
                     zones.pop_back();
                 }
+				else{
+                    if(mapLoaded){
+                        vector<ofPoint> lastZone = zones.back();
+                        for(int i=0;i<lastZone.size();i++){
+                            lastZone[i]=homography*lastZone[i];
+                        }
+					}
+				}
                 drawZones();
             }
         }
@@ -265,13 +321,17 @@ void testApp::guiEvent(ofxUIEventArgs &e)
 void testApp::exit(){
     kinect.setCameraTiltAngle(0);
 	kinect.close();
-    
+
     gui->saveSettings("GUI/guiSettings.xml");
-    
+
     saveZones();
-    
+
     saveMap();
-    
+
+    delete tmpThresMask;
+    delete tmpMapMask;
+    delete tmpZonesMask;
+
     delete gui;
 }
 
@@ -281,7 +341,7 @@ void testApp::loadZones(){
     dir.allowExt("zone");
     dir.listDir("zones/");
 	dir.sort(); // in linux the file system doesn't return file lists ordered in alphabetical order
-    
+
 	// you can now iterate through the files and load them into the ofImage vector
 	for(int i = 0; i < (int)dir.size(); i++){
         ofBuffer buf=ofBufferFromFile(dir.getPath(i));
@@ -293,7 +353,7 @@ void testApp::loadZones(){
             vector<string> p = ofSplitString(line, ",");
             points.push_back(ofPoint(ofToInt(p[0]),ofToInt(p[1])));
         }
-        
+
 		zones.push_back(points);
 	}
     drawZones();
@@ -322,7 +382,10 @@ void testApp::loadMap(){
             vector<string> p = ofSplitString(line, ",");
             map[i++]=ofPoint(ofToInt(p[0]),ofToInt(p[1]));
         }
+		mapLoaded=true;
 	}
+	else
+		mapLoaded=false;
     drawMap();
 }
 
@@ -358,9 +421,10 @@ void testApp::mouseDragged(int x, int y, int button){
 //--------------------------------------------------------------
 void testApp::mousePressed(int x, int y, int button)
 {
-    if(mouseX>10 && mouseX<340 && mouseY>260 && mouseY<500){
-        int mX=2*(mouseX-10);
-        int mY=2*(mouseY-260);
+    ofxUIRectangle * guiWindow = gui->getRect();
+    if(!guiWindow->inside(x,y)){//mouseX>10 && mouseX<340 && mouseY>260 && mouseY<500){
+        int mX=x*kinect.width/ofGetWidth();//2*(mouseX-10);
+        int mY=y*kinect.height/ofGetHeight();;//2*(mouseY-260);
         if(zonesOpen){
             if(button==0){
                 zones.back().push_back(ofPoint(mX,mY));
@@ -407,7 +471,7 @@ void testApp::drawZones()
             ofPoint p1=zones[i].back();
             ofLine(p0.x,p0.y,p1.x,p1.y);
             zonesFbo.end();
-            
+
         }
         if(zones[i].size()>=3)
         {

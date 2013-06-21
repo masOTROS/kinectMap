@@ -9,9 +9,14 @@
 #include "ofxUI.h"
 #include "ofxXmlSettings.h"
 
+#include "ofxOsc.h"
+
 #define BACKGROUND_FRAMES 100
 
 #define MAP_POINTS 4
+
+#define PORT 12000
+#define IP "localHost"
 
 class testApp : public ofBaseApp{
 public:
@@ -32,6 +37,8 @@ public:
 
     void getBackground();
 
+    ofImage backgroundImg;
+
 	ofxKinect kinect;
     ofxBlobTracker          touchTracker;
     ofxKinectInpainter inPainter;
@@ -41,6 +48,10 @@ public:
     ofxCvGrayscaleImage thresMask;
     int dilate;
     int erode;
+
+    unsigned char * tmpThresMask;
+    unsigned char * tmpMapMask;
+    unsigned char * tmpZonesMask;
 
     float nearThreshold;
     float farThreshold;
@@ -63,20 +74,26 @@ public:
     void saveZones();
     void loadZones();
     void drawZones();
-    
+
     ofxCvGrayscaleImage zonesMask;
-    
+
     ofFbo mapFbo;
     ofPixels mapPixels;
     ofPoint map[MAP_POINTS];
+    ofPoint screenRef[MAP_POINTS];
     int mapPoint;
     bool mapOpen;
+	bool mapLoaded;
     void saveMap();
     void loadMap();
     void drawMap();
-    
+
     ofxCvGrayscaleImage mapMask;
-    
+
+	ofMatrix4x4 homography;
+
+    ofxOscSender sender;
+
     ofxUISuperCanvas *gui;
 	void guiEvent(ofxUIEventArgs &e);
 
