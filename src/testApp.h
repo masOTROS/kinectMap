@@ -83,7 +83,6 @@ public:
     ofPoint screenRef[MAP_POINTS];
     int mapPoint;
     bool mapOpen;
-	bool mapLoaded;
     void saveMap();
     void loadMap();
     void drawMap();

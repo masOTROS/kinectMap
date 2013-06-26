@@ -2,13 +2,13 @@
     <Kind>42</Kind>
     <Name>OFX_UI_WIDGET_CANVAS</Name>
     <IsMinified>0</IsMinified>
-    <XPosition>716.000000000</XPosition>
-    <YPosition>91.000000000</YPosition>
+    <XPosition>677.000000000</XPosition>
+    <YPosition>54.000000000</YPosition>
 </Canvas>
 <Widget>
     <Kind>4</Kind>
     <Name>angle</Name>
-    <Value>0.000000000</Value>
+    <Value>30.000000000</Value>
 </Widget>
 <Widget>
     <Kind>17</Kind>
@@ -33,8 +33,8 @@
 <Widget>
     <Kind>6</Kind>
     <Name>near and far threshold</Name>
-    <HighValue>2610.837402344</HighValue>
-    <LowValue>1748.768554688</LowValue>
+    <HighValue>2068.965576172</HighValue>
+    <LowValue>1157.635498047</LowValue>
 </Widget>
 <Widget>
     <Kind>6</Kind>

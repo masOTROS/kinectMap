@@ -3,7 +3,6 @@
 
 //--------------------------------------------------------------
 void testApp::setup() {
-
 	ofSetLogLevel(OF_LOG_VERBOSE);
 
     ofEnableAlphaBlending();
@@ -20,7 +19,7 @@ void testApp::setup() {
 	kinect.open();
 
     angle=0;
-	kinect.setCameraTiltAngle(angle);
+	//kinect.setCameraTiltAngle(angle);
 	//ofSleepMillis(1000);
 
 	kinect.enableDepthNearValueWhite(true);
@@ -51,23 +50,6 @@ void testApp::setup() {
     dilate=10;
     erode=10;
 
-	zonesFbo.allocate(kinect.width,kinect.height);
-	zonesPixels.allocate(kinect.width,kinect.height,OF_IMAGE_GRAYSCALE);
-    loadZones();
-    mapMask.allocate(kinect.width, kinect.height);
-
-    mapPoint=0;
-	mapFbo.allocate(kinect.width,kinect.height);
-	mapPixels.allocate(kinect.width,kinect.height,OF_IMAGE_GRAYSCALE);
-    loadMap();
-    zonesMask.allocate(kinect.width, kinect.height);
-	screenRef[0]=ofPoint(0,0);
-	screenRef[1]=ofPoint(640,0);
-	screenRef[2]=ofPoint(640,480);
-	screenRef[3]=ofPoint(0,480);
-
-    sender.setup(IP,PORT);
-
     gui = new ofxUISuperCanvas("kinectMap", OFX_UI_FONT_MEDIUM);
     gui->addSpacer();
     gui->addTextArea("CONTROL", "Control de parametros de kinectMap");
@@ -94,6 +76,23 @@ void testApp::setup() {
 
     if(ofFile::doesFileExist("GUI/guiSettings.xml"))
         gui->loadSettings("GUI/guiSettings.xml");
+
+    screenRef[0]=ofPoint(0,0);
+	screenRef[1]=ofPoint(640,0);
+	screenRef[2]=ofPoint(640,480);
+	screenRef[3]=ofPoint(0,480);
+    mapPoint=0;
+	mapFbo.allocate(kinect.width,kinect.height);
+	mapPixels.allocate(kinect.width,kinect.height,OF_IMAGE_GRAYSCALE);
+    mapMask.allocate(kinect.width, kinect.height);
+    loadMap();
+
+	zonesFbo.allocate(kinect.width,kinect.height);
+	zonesPixels.allocate(kinect.width,kinect.height,OF_IMAGE_GRAYSCALE);
+    zonesMask.allocate(kinect.width, kinect.height);
+    loadZones();
+
+    sender.setup(IP,PORT);
 
     mapOpen=false;
 
@@ -210,8 +209,19 @@ void testApp::draw() {
 	if(zonesOpen){
         ofSetColor(255);
         backgroundImg.draw(0, 0, ofGetWidth(), ofGetHeight());
-        ofSetColor(0, 0, 255, 60);
-        zonesFbo.draw(0, 0, ofGetWidth(), ofGetHeight());
+        if(zones.size() && zones.back().size()){
+            ofSetColor(255, 255, 255, 150);
+            //ofScale(ofGetWidth()/kinect.width,ofGetHeight()/kinect.height);
+            ofBeginShape();
+            ofCurveVertex(zones.back().front().x*ofGetWidth()/kinect.width,zones.back().front().y*ofGetHeight()/kinect.height);
+            ofCurveVertex(zones.back().front().x*ofGetWidth()/kinect.width,zones.back().front().y*ofGetHeight()/kinect.height);
+            for(int i=1;i<(zones.back().size()-1);i++){
+                ofCurveVertex(zones.back()[i].x*ofGetWidth()/kinect.width,zones.back()[i].y*ofGetHeight()/kinect.height);
+            }
+            ofCurveVertex(zones.back().back().x*ofGetWidth()/kinect.width,zones.back().back().y*ofGetHeight()/kinect.height);
+            ofCurveVertex(zones.back().back().x*ofGetWidth()/kinect.width,zones.back().back().y*ofGetHeight()/kinect.height);
+            ofEndShape();
+        }
         ofDrawBitmapString("Ready to add points",10,10);
     }
     else if(mapOpen){
@@ -267,7 +277,7 @@ void testApp::touchAdded(ofxBlob &_blob){
     int z=255-zonesPixels[x+y*kinect.width];
     ofxOscMessage m;
     m.setAddress("/play");
-    m.addIntArg(z-1);
+    m.addIntArg(z);
     sender.sendMessage(m);
 }
 
@@ -300,16 +310,13 @@ void testApp::guiEvent(ofxUIEventArgs &e)
         else{
 			ofSetFullscreen(false);
             if(zones.size()){
-                if(!zones.back().size()){
-                    zones.pop_back();
+                if(zones.back().size()){
+                    for(int i=0;i<zones.back().size();i++){
+                        zones.back()[i]=homography*zones.back()[i];
+                    }
                 }
 				else{
-                    if(mapLoaded){
-                        vector<ofPoint> lastZone = zones.back();
-                        for(int i=0;i<lastZone.size();i++){
-                            lastZone[i]=homography*lastZone[i];
-                        }
-					}
+                    zones.pop_back();
 				}
                 drawZones();
             }
@@ -319,7 +326,7 @@ void testApp::guiEvent(ofxUIEventArgs &e)
 
 //--------------------------------------------------------------
 void testApp::exit(){
-    kinect.setCameraTiltAngle(0);
+    //kinect.setCameraTiltAngle(0);
 	kinect.close();
 
     gui->saveSettings("GUI/guiSettings.xml");
@@ -353,20 +360,23 @@ void testApp::loadZones(){
             vector<string> p = ofSplitString(line, ",");
             points.push_back(ofPoint(ofToInt(p[0]),ofToInt(p[1])));
         }
-
-		zones.push_back(points);
+        if(points.size())
+            zones.push_back(points);
 	}
     drawZones();
 }
 
 //--------------------------------------------------------------
 void testApp::saveZones(){
+    int f=0;
     for(int i=0;i<zones.size();i++){
-        ofBuffer buf;
-        for(int j=0;j<zones[i].size();j++){
-            buf.append(ofToString(zones[i][j])+"\n");
+        if(zones[i].size()){
+            ofBuffer buf;
+            for(int j=0;j<zones[i].size();j++){
+                buf.append(ofToString(zones[i][j])+"\n");
+            }
+            ofBufferToFile("zones/"+ofToString(f++)+".zone",buf);
         }
-        ofBufferToFile("zones/"+ofToString(i)+".zone",buf);
     }
 }
 
@@ -382,10 +392,8 @@ void testApp::loadMap(){
             vector<string> p = ofSplitString(line, ",");
             map[i++]=ofPoint(ofToInt(p[0]),ofToInt(p[1]));
         }
-		mapLoaded=true;
 	}
-	else
-		mapLoaded=false;
+	homography=findHomography(screenRef,map);
     drawMap();
 }
 
@@ -447,6 +455,7 @@ void testApp::mousePressed(int x, int y, int button)
                 mapOpen=false;
                 mapPoint=0;
             }
+            homography=findHomography(screenRef,map);
             drawMap();
         }
     }
