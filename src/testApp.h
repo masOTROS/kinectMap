@@ -45,11 +45,9 @@ public:
     ofFloatPixels background;
     ofxCvGrayscaleImage backgroundTex;
     // for KinectBlobTracker
-    ofxCvGrayscaleImage thresMask;
     int dilate;
     int erode;
 
-    unsigned char * tmpThresMask;
     unsigned char * tmpMapMask;
     unsigned char * tmpZonesMask;
 

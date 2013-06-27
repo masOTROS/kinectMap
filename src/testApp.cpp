@@ -30,10 +30,8 @@ void testApp::setup() {
 
     background.allocate(kinect.width, kinect.height, OF_IMAGE_GRAYSCALE);
     backgroundTex.allocate(kinect.width,kinect.height);//,OF_IMAGE_GRAYSCALE);
-    thresMask.allocate(kinect.width, kinect.height);
     inPainter.setup(kinect.width, kinect.height);
 
-    tmpThresMask = new unsigned char[kinect.width*kinect.height];
     tmpMapMask = new unsigned char[kinect.width*kinect.height];
     tmpZonesMask = new unsigned char[kinect.width*kinect.height];
 
@@ -158,7 +156,6 @@ void testApp::update() {
 
         for(int i=0;i<numPixels;i++)
         {
-            tmpThresMask[i]=0;
             tmpMapMask[i]=0;
             tmpZonesMask[i]=0;
             float tmpBackDist = background[i];
@@ -169,7 +166,6 @@ void testApp::update() {
             }
             if(current[i]<farThreshold && current[i]>nearThreshold)
             {
-                tmpThresMask[i]=(unsigned char)ofMap(current[i],nearThreshold,farThreshold,255,0);
                 if(mapPixels[i]){
                     float diff=background[i]-current[i];
                     if(diff>touchDiffNearThreshold){
@@ -187,7 +183,6 @@ void testApp::update() {
             background[i] = tmpBackDist;
             tmpBackground[i] = (unsigned char)tmpBackImg;
         }
-        thresMask.setFromPixels(tmpThresMask, kinect.width, kinect.height);
         mapMask.setFromPixels(tmpMapMask, kinect.width, kinect.height);
         zonesMask.setFromPixels(tmpZonesMask, kinect.width, kinect.height);
 
@@ -226,7 +221,7 @@ void testApp::draw() {
     }
     else if(mapOpen){
         ofSetColor(255);
-        thresMask.draw(0, 0, ofGetWidth(), ofGetHeight());
+        kinect.drawDepth(0, 0, ofGetWidth(), ofGetHeight());
         ofSetColor(255, 0 , 0, 60);
         mapFbo.draw(0, 0, ofGetWidth(), ofGetHeight());
     }
@@ -239,21 +234,19 @@ void testApp::draw() {
 
 		backgroundTex.draw(340,10,320,240);
 
-		thresMask.draw(10, 260, 320, 240);
-
 		ofSetColor(255, 0 , 0);
-		mapMask.draw(340, 260, 320, 240);
+		mapMask.draw(15, 260, 640, 480);
 
-		ofSetColor(0, 0, 255, 150);
-		zonesMask.draw(340, 260, 320, 240);
+		ofSetColor(0, 0, 255, 80);
+		zonesMask.draw(15, 260, 640, 480);
 
 		ofSetColor(255,0,255,60);
-		mapFbo.draw(10,260,320,240);
+		mapFbo.draw(15,260,640,480);
 
 		ofSetColor(255,255,0,100);
-		zonesFbo.draw(10,260,320,240);
+		zonesFbo.draw(15,260,640,480);
 
-		touchTracker.draw(340,260,320,240);
+		touchTracker.draw(15,260,640,480);
 
 		// draw instructions
 		ofSetColor(255, 255, 255);
@@ -301,6 +294,9 @@ void testApp::guiEvent(ofxUIEventArgs &e)
         if(angle<-30.) angle=-30.;
         kinect.setCameraTiltAngle(angle);
     }
+    else if(name=="near and far threshold"){
+        kinect.setDepthClipping(nearThreshold,farThreshold);
+    }
     else if(name=="zonesOpen"){
         if(zonesOpen){
             vector<ofPoint> points;
@@ -335,7 +331,6 @@ void testApp::exit(){
 
     saveMap();
 
-    delete tmpThresMask;
     delete tmpMapMask;
     delete tmpZonesMask;
 
